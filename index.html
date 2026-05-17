@@ -24,19 +24,24 @@
         .info-card { margin-top: 40px; background: linear-gradient(rgba(138, 43, 226, 0.05), rgba(0, 242, 255, 0.05)); border: 1px solid rgba(255,255,255,0.05); border-radius: 20px; padding: 25px; text-align: center; }
         .icon-container { width: 48px; height: 48px; border-radius: 12px; overflow: hidden; border: 2px solid var(--flxp-purple); box-shadow: 0 0 15px rgba(138, 43, 226, 0.4); display: flex; align-items: center; justify-content: center; background: black; }
         .icon-container img { width: 100%; height: 100%; object-fit: cover; }
+        
+        /* Анимация появления для встроенного уведомления */
+        .notification-fade-in { animation: fadeIn 0.25s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useMemo } = React;
+        const { useState, useMemo, useEffect } = React;
 
         const App = () => {
             const [mode, setMode] = useState('ban');
             const [subMode, setSubMode] = useState('ban');
             const [form, setForm] = useState({ 
                 id: '', 
-                duration: '', 
+                durationValue: '', 
+                durationUnit: 'h', 
                 reason: '', 
                 editField: 'r', 
                 editValue: '', 
@@ -45,33 +50,57 @@
             });
             const [recidivEnabled, setRecidivEnabled] = useState(false);
             const [copied, setCopied] = useState(false);
+            const [showNotice, setShowNotice] = useState(false);
 
             const descriptions = {
-                ban: { title: "Ограничение доступа к серверу", text: "Полное ограничение доступа к серверу. Требует указания срока или 50y для перманентного бана.", icon: "fa-gavel" },
+                ban: { title: "Ограничение доступа к серверу", text: "Полное ограничение доступа к серверу. Выберите срок или укажите 50y для перманентного бана.", icon: "fa-gavel" },
                 warn: { title: "Система предупреждений", text: "Официальный варн за мелкие нарушения.", icon: "fa-exclamation-triangle" },
                 rp: { title: "Аннулирование наказания", text: "Revoke Punishment - снятие ошибочного или амнистированного наказания по его ID.", icon: "fa-undo" },
                 ep: { title: "Редактирование вердикта", text: "Edit Punishment - изменение параметров (причины, срока, IP) уже выданного наказания.", icon: "fa-edit" }
             };
 
+            // Проверяем, нужно ли показывать уведомление о годах
+            useEffect(() => {
+                if (mode === 'ban' && form.durationUnit === 'y' && form.durationValue) {
+                    setShowNotice(true);
+                } else {
+                    setShowNotice(false);
+                }
+            }, [form.durationUnit, form.durationValue, mode]);
+
             const generatedCommand = useMemo(() => {
-                const { id, duration, reason, editField, editValue, globalFlag, recidivMult } = form;
+                const { id, durationValue, durationUnit, reason, editField, editValue, globalFlag, recidivMult } = form;
                 const targetID = id || '[ID/SteamID]';
                 const res = reason || '[Причина]';
                 
                 if (mode === 'ban' || mode === 'warn') {
                     const isBanRecidiv = mode === 'ban' && recidivEnabled;
-                    let finalDuration = duration;
                     const recidivText = isBanRecidiv ? ` + рецидив x${recidivMult}` : "";
+                    
+                    let finalDuration = '[Время]';
+                    
+                    if (durationValue) {
+                        let val = parseInt(durationValue);
+                        if (!isNaN(val)) {
+                            let unit = durationUnit;
+                            
+                            if (unit === 'y') {
+                                val = val * 365;
+                                unit = 'd';
+                            }
 
-                    if (isBanRecidiv && duration && duration !== '50y') {
-                        const timeValue = parseInt(duration);
-                        const timeUnit = duration.replace(/[0-9]/g, '');
-                        if (!isNaN(timeValue)) finalDuration = (timeValue * parseInt(recidivMult)) + timeUnit;
+                            if (form.durationValue === '50' && form.durationUnit === 'y') {
+                                finalDuration = '18250d';
+                            } else if (isBanRecidiv) {
+                                finalDuration = (val * parseInt(recidivMult)) + unit;
+                            } else {
+                                finalDuration = val + unit;
+                            }
+                        }
                     }
                     
                     if (mode === 'ban') {
-                        const dur = finalDuration || '[Время]';
-                        return `ban ${targetID} ${dur} ${res}${recidivText}${globalFlag ? ' -g' : ''}`;
+                        return `ban ${targetID} ${finalDuration} ${res}${recidivText}${globalFlag ? ' -g' : ''}`;
                     }
                     return `warn ${targetID} ${res}`;
                 }
@@ -107,7 +136,7 @@
                             </div>
                         </div>
 
-                        {/* Единая сетка для всех режимов */}
+                        {/* Сетка полей ввода */}
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 items-end">
                             <div className="md:col-span-2 space-y-2">
                                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">{(mode === 'rp' || mode === 'ep') ? `ID ${subMode === 'ban' ? 'бана' : 'варна'}` : 'SteamID'}</label>
@@ -117,7 +146,15 @@
                             {mode === 'ban' && (
                                 <div className="md:col-span-2 space-y-2">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Длительность</label>
-                                    <input value={form.duration} onChange={e => setForm({...form, duration: e.target.value})} placeholder="12h / 3d / 50y" className="w-full p-4 rounded-xl input-field font-mono" />
+                                    <div className="flex gap-2">
+                                        <input type="number" min="1" value={form.durationValue} onChange={e => setForm({...form, durationValue: e.target.value})} placeholder="Число" className="w-2/3 p-4 rounded-xl input-field font-mono" />
+                                        <select value={form.durationUnit} onChange={e => setForm({...form, durationUnit: e.target.value})} className="w-1/3 p-4 rounded-xl input-field appearance-none cursor-pointer text-xs font-bold uppercase text-center">
+                                            <option value="m">m (мин)</option>
+                                            <option value="h">h (час)</option>
+                                            <option value="d">d (день)</option>
+                                            <option value="y">y (год)</option>
+                                        </select>
+                                    </div>
                                 </div>
                             )}
 
@@ -146,7 +183,6 @@
                             )}
                         </div>
 
-                        {/* Переключатель BAN/WARN для RP/EP вынесен под ID для симметрии */}
                         {(mode === 'rp' || mode === 'ep') && (
                             <div className="flex gap-4 p-1.5 bg-black/40 rounded-xl border border-white/5 w-full md:w-1/2 mb-8">
                                 <button onClick={() => setSubMode('ban')} className={`flex-1 py-2.5 rounded-lg text-[10px] font-black transition-all ${subMode === 'ban' ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/40' : 'text-slate-500'}`}>BAN MODE</button>
@@ -183,7 +219,20 @@
                             </div>
                         )}
 
+                        {/* Зона вывода готового вердикта */}
                         <div className="mt-12 pt-8 border-t border-white/5">
+                            
+                            {/* Новое место для уведомления о баге (над кодом команды) */}
+                            {showNotice && (
+                                <div className="mb-4 bg-amber-950/40 border border-amber-500/40 text-amber-200 px-5 py-3.5 rounded-xl flex items-center gap-4 notification-fade-in">
+                                    <div className="text-amber-400 text-lg"><i className="fas fa-exclamation-circle"></i></div>
+                                    <div className="text-xs font-medium leading-relaxed">
+                                        <span className="font-black uppercase tracking-wider block text-amber-400 mb-0.5">Внимание!</span>
+                                        Символ <span className="font-mono bg-black/60 px-1 py-0.5 rounded border border-amber-500/30 text-white font-bold">y</span> сейчас не принимается системой. Срок автоматически переведён в <span className="font-bold text-white">дни (d)</span> (1г = 365д).
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="bg-black/50 p-6 rounded-2xl border-2 border-dashed border-slate-800 text-center mb-6 font-mono text-white text-lg break-all">
                                 {generatedCommand}
                             </div>
@@ -195,9 +244,9 @@
 
                     <div className="w-full max-w-4xl info-card">
                         <h2 className="flxp-gradient-text uppercase text-xs tracking-widest mb-2">Данное приложение не является официальным продуктом FLX-project</h2>
-                            <p className="text-slate-400 text-xs">
-                                Оно было создано сторонним разработчиком <a className="text-cyan-400 font-bold no-underline hover:underline" href="https://discord.com/users/534028333982285842" target="_blank" rel="noopener noreferrer">Academic (@academic_as)</a> специально для FLX-project.
-                            </p>
+                        <p className="text-slate-400 text-xs">
+                            Оно было создано сторонним разработчиком <a className="text-cyan-400 font-bold no-underline hover:underline" href="https://discord.com/users/534028333982285842" target="_blank" rel="noopener noreferrer">Academic (@academic_as)</a> специально для FLX-project.
+                        </p>
                     </div>
                 </div>
             );
